@@ -575,6 +575,40 @@ impl<T: Transport, C: PdClient> Store<T, C> {
                     return Err(e);
                 }
             }
+
+            // If this peer detects the leader is missing for a long long time,
+            // it should consider itself as a stale peer which is removed from
+            // the original cluster.
+            // This most likely happens in the following scenario:
+            // At first, there are three node A, B, C in the cluster, and A is leader.
+            // Node B gets down. And then A adds D, E, F into the cluster.
+            // Node D becomes leader of the new cluster, and then removes node A, B, C.
+            // After all these node in and out, now the cluster has node D, E, F.
+            // If node B goes up at this moment, it still thinks it is one of the cluster
+            // and has peers A, C. However, it could not reach A, C since they are removed
+            // from the cluster or probably destroyed.
+            // Meantime, D, E, F would not reach B, since it's not in the cluster anymore.
+            // In this case, Node B would notice that the leader is missing for a long time,
+            // and it would check with pd to confirm whether it's still a member of the cluster.
+            // If not, it destroys itself as a stale peer which is removed out already.
+            if let Some(peer) = self.region_peers.get_mut(&region_id) {
+                let duration = peer.since_leader_missing();
+                if duration >= self.cfg.max_leader_missing_duration {
+                    info!("peer {} leader missing for a long time, check with pd whether \
+                           it's still valid",
+                          peer.tag);
+                    // reset the leader missing time to avoid sending the same tasks to
+                    // PD worker continuously on everytime raft ready event triggers
+                    peer.reset_leader_missing_time();
+                    let task = PdTask::ValidatePeer {
+                        peer: peer.peer.clone(),
+                        region: peer.region().clone(),
+                    };
+                    if let Err(e) = self.pd_worker.schedule(task) {
+                        error!("{} failed to notify pd: {}", peer.tag, e)
+                    }
+                }
+            }
         }
 
         slow_log!(t, "on {} regions raft ready", pending_count);
