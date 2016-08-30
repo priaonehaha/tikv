@@ -47,7 +47,7 @@ fn test_stale_peer_out_of_region<T: Simulator>(cluster: &mut Cluster<T>) {
     // Use a value of twice the election timeout here just for test.
     // In production environment, the value of max_leader_missing_duration
     // should be configured far beyond the election timeout.
-    let max_leader_missing_duration = Duration::from_millis(300);
+    let max_leader_missing_duration = Duration::from_secs(1);
     cluster.cfg.raft_store.max_leader_missing_duration = max_leader_missing_duration;
     let pd_client = cluster.pd_client.clone();
     // Disable default max peer number check.
