@@ -41,7 +41,9 @@ pub enum Task {
         peer: metapb::Peer,
         down_peers: Vec<pdpb::PeerStats>,
     },
-    StoreHeartbeat { stats: pdpb::StoreStats },
+    StoreHeartbeat {
+        stats: pdpb::StoreStats,
+    },
     ReportSplit {
         left: metapb::Region,
         right: metapb::Region,
@@ -210,6 +212,9 @@ impl<T: PdClient> Runner<T> {
                 if !valid {
                     // Peer is not a member of this region anymore. Probably it's removed out.
                     // Send it a raft massage to destroy it since it's obsolete.
+                    info!("peer {} is not a valid member of region {:?}. To be destroyed soon.",
+                          peer.get_id(),
+                          pd_region);
                     let mut message = RaftMessage::new();
                     message.set_region_id(local_region.get_id());
                     message.set_from_peer(peer.clone());
@@ -221,6 +226,10 @@ impl<T: PdClient> Runner<T> {
                                local_region.get_id(),
                                e)
                     }
+                } else {
+                    info!("peer {} is still valid in region {:?}",
+                          peer.get_id(),
+                          pd_region);
                 }
             }
             Err(e) => error!("get region failed {:?}", e),
