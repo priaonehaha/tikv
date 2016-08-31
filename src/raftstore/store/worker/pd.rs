@@ -41,9 +41,7 @@ pub enum Task {
         peer: metapb::Peer,
         down_peers: Vec<pdpb::PeerStats>,
     },
-    StoreHeartbeat {
-        stats: pdpb::StoreStats,
-    },
+    StoreHeartbeat { stats: pdpb::StoreStats },
     ReportSplit {
         left: metapb::Region,
         right: metapb::Region,
