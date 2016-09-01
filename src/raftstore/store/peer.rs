@@ -242,7 +242,7 @@ impl Peer {
             coprocessor_host: CoprocessorHost::new(),
             size_diff_hint: 0,
             pending_remove: false,
-            leader_missing_time: None,
+            leader_missing_time: Some(Instant::now()),
             tag: tag,
         };
 
