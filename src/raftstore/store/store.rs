@@ -273,6 +273,7 @@ impl<T: Transport, C: PdClient> Store<T, C> {
     }
 
     fn on_raft_base_tick(&mut self, event_loop: &mut EventLoop<Self>) {
+        let mut region_to_be_destroyed = vec![];
         for (&region_id, peer) in &mut self.region_peers {
             if !peer.get_store().is_applying_snap() {
                 peer.raft_group.tick();
@@ -304,15 +305,28 @@ impl<T: Transport, C: PdClient> Store<T, C> {
                     // reset the leader missing time to avoid sending the same tasks to
                     // PD worker continuously on everytime raft ready event triggers
                     peer.reset_leader_missing_time();
-                    let task = PdTask::ValidatePeer {
-                        peer: peer.peer.clone(),
-                        region: peer.region().clone(),
-                    };
-                    if let Err(e) = self.pd_worker.schedule(task) {
-                        error!("{} failed to notify pd: {}", peer.tag, e)
+                    if peer.is_initialized() {
+                        // for peer B in case 1 above
+                        let task = PdTask::ValidatePeer {
+                            peer: peer.peer.clone(),
+                            region: peer.region().clone(),
+                        };
+                        if let Err(e) = self.pd_worker.schedule(task) {
+                            error!("{} failed to notify pd: {}", peer.tag, e)
+                        }
+                    } else {
+                        // for peer B in case 2 above
+                        // directly destroy peer without data since it doesn't have region range,
+                        // so that it doesn't have the correct region start_key to validate peer with PD
+                        region_to_be_destroyed.push((region_id, peer.peer.clone()))
                     }
                 }
             }
+        }
+
+        // do perform the peer destroy
+        for (region_id, peer) in region_to_be_destroyed {
+            self.destroy_peer(region_id, peer);
         }
 
         self.register_raft_base_tick(event_loop);
