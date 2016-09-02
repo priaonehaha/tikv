@@ -200,8 +200,9 @@ impl<T: PdClient> Runner<T> {
                     // that a pending region split is happenning right now and that region
                     // doesn't report it's heartbeat(with updated region info) yet.
                     // We should sit tight and try another get_region task later.
-                    warn!("peer {} fails to get region info from pd with start key: {:?}, retry \
-                           later",
+                    warn!("[region {}] {} fails to get region info from pd with start key: {:?}, \
+                           retry later",
+                          local_region.get_id(),
                           peer.get_id(),
                           local_region.get_start_key());
                     return;
@@ -210,7 +211,9 @@ impl<T: PdClient> Runner<T> {
                 if !valid {
                     // Peer is not a member of this region anymore. Probably it's removed out.
                     // Send it a raft massage to destroy it since it's obsolete.
-                    info!("peer {} is not a valid member of region {:?}. To be destroyed soon.",
+                    info!("[region {}] {} is not a valid member of region {:?}. To be destroyed \
+                           soon.",
+                          local_region.get_id(),
                           peer.get_id(),
                           pd_region);
                     let mut message = RaftMessage::new();
