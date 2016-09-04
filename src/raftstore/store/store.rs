@@ -283,20 +283,23 @@ impl<T: Transport, C: PdClient> Store<T, C> {
                 // it should consider itself as a stale peer which is removed from
                 // the original cluster.
                 // This most likely happens in the following scenario:
-                // 1. At first, there are three node A, B, C in the cluster, and A is leader.
-                // Node B gets down. And then A adds D, E, F into the cluster.
-                // Node D becomes leader of the new cluster, and then removes node A, B, C.
-                // After all these node in and out, now the cluster has node D, E, F.
-                // If node B goes up at this moment, it still thinks it is one of the cluster
+                // 1. At first, there are three peer A, B, C in the cluster, and A is leader.
+                // Peer B gets down. And then A adds D, E, F into the cluster.
+                // Peer D becomes leader of the new cluster, and then removes peer A, B, C.
+                // After all these peer in and out, now the cluster has peer D, E, F.
+                // If peer B goes up at this moment, it still thinks it is one of the cluster
                 // and has peers A, C. However, it could not reach A, C since they are removed
                 // from the cluster or probably destroyed.
                 // Meantime, D, E, F would not reach B, since it's not in the cluster anymore.
+                // In this case, peer B would notice that the leader is missing for a long time,
+                // and it would check with pd to confirm whether it's still a member of the cluster.
+                // If not, it destroys itself as a stale peer which is removed out already.
                 // 2. A peer, B is initialized as a replicated peer without data after
                 // receiving a single raft AE message. But then it goes through some process like 1,
                 // it's removed out of the region and wouldn't be contacted anymore.
-                // In both cases, Node B would notice that the leader is missing for a long time,
-                // and it would check with pd to confirm whether it's still a member of the cluster.
-                // If not, it destroys itself as a stale peer which is removed out already.
+                // In this case, peer B would notice that the leader is missing for a long time,
+                // and it's an uninitialized peer without any data. It would destroy itself as
+                // a stale peer directly.
                 let duration = peer.since_leader_missing();
                 if duration >= self.cfg.max_leader_missing_duration {
                     info!("{} detects leader missing for a long time. To check with pd whether \

@@ -78,6 +78,31 @@ mod tests {
 
     use super::*;
 
+    // Tests the util function `check_key_in_region`.
+    #[test]
+    fn test_check_key_in_region() {
+        let test_cases = vec![// key, region start_key, region end_key, result(Ok: true, Err: false)
+                              ("", "", "", true),
+                              ("", "", "6", true),
+                              ("", "3", "6", false),
+                              ("4", "3", "6", true),
+                              ("4", "3", "", true),
+                              ("2", "3", "6", false),
+                              ("", "3", "6", false),
+                              ("", "3", "", false)];
+        for c in &test_cases {
+            let key = c.0.as_bytes();
+            let mut region = metapb::Region::new();
+            region.set_start_key(c.1.as_bytes().to_vec());
+            region.set_end_key(c.2.as_bytes().to_vec());
+            let result = check_key_in_region(key, &region);
+            match result {
+                Ok(_) => assert_eq!(c.3, true),
+                Err(_) => assert_eq!(c.3, false),
+            }
+        }
+    }
+
     #[test]
     fn test_peer() {
         let mut region = metapb::Region::new();

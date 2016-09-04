@@ -28,6 +28,7 @@ use util::transport::SendCh;
 use pd::PdClient;
 use raftstore::store::Msg;
 use raftstore::Result;
+use raftstore::store::util::check_key_in_region;
 
 // Use an asynchronous thread to tell pd something.
 pub enum Task {
@@ -183,19 +184,34 @@ impl<T: PdClient> Runner<T> {
         }
     }
 
+    // send a raft message to destroy the specified stale peer
+    fn send_destroy_peer_message(&self,
+                                 local_region: metapb::Region,
+                                 peer: metapb::Peer,
+                                 pd_region: metapb::Region) {
+        info!("[region {}] {} is not a valid member of region {:?}. To be destroyed soon.",
+              local_region.get_id(),
+              peer.get_id(),
+              pd_region);
+        let mut message = RaftMessage::new();
+        message.set_region_id(local_region.get_id());
+        message.set_from_peer(peer.clone());
+        message.set_to_peer(peer.clone());
+        message.set_region_epoch(pd_region.get_region_epoch().clone());
+        message.set_is_tombstone(true);
+        if let Err(e) = self.ch.send(Msg::RaftMessage(message)) {
+            error!("send gc peer request to region {} err {:?}",
+                   local_region.get_id(),
+                   e)
+        }
+    }
+
     fn handle_validate_peer(&self, local_region: metapb::Region, peer: metapb::Peer) {
         metric_incr!("pd.get_region");
         match self.pd_client.get_region(local_region.get_start_key()) {
-            Ok(mut pd_region) => {
+            Ok(pd_region) => {
                 metric_incr!("pd.get_region");
-                if pd_region == local_region {
-                    // Local region info is as fresh as pd, which means
-                    // local peer is still in the region, let it be there.
-                    info!("peer {:?} is still valid because local region info is as fresh as pd",
-                          peer);
-                    return;
-                }
-                if !(pd_region.get_start_key() == local_region.get_start_key()) {
+                if let Err(_) = check_key_in_region(local_region.get_start_key(), &pd_region) {
                     // The region [start_key, ...) is missing in pd currently. It's probably
                     // that a pending region split is happenning right now and that region
                     // doesn't report it's heartbeat(with updated region info) yet.
@@ -205,33 +221,29 @@ impl<T: PdClient> Runner<T> {
                           local_region.get_id(),
                           peer.get_id(),
                           local_region.get_start_key());
+                    warn!("xxx local region: {:?}", local_region);
+                    warn!("xxx pd region: {:?}", pd_region);
                     return;
                 }
+                if pd_region.get_id() != local_region.get_id() {
+                    // The region range is covered by another region(different region id).
+                    // Local peer must be obsolete.
+                    self.send_destroy_peer_message(local_region, peer, pd_region);
+                    return;
+                }
+
                 let valid = pd_region.get_peers().into_iter().any(|p| p.to_owned() == peer);
                 if !valid {
                     // Peer is not a member of this region anymore. Probably it's removed out.
                     // Send it a raft massage to destroy it since it's obsolete.
-                    info!("[region {}] {} is not a valid member of region {:?}. To be destroyed \
-                           soon.",
-                          local_region.get_id(),
-                          peer.get_id(),
-                          pd_region);
-                    let mut message = RaftMessage::new();
-                    message.set_region_id(local_region.get_id());
-                    message.set_from_peer(peer.clone());
-                    message.set_to_peer(peer.clone());
-                    message.set_region_epoch(pd_region.take_region_epoch());
-                    message.set_is_tombstone(true);
-                    if let Err(e) = self.ch.send(Msg::RaftMessage(message)) {
-                        error!("send gc peer request to region {} err {:?}",
-                               local_region.get_id(),
-                               e)
-                    }
-                } else {
-                    info!("peer {} is still valid in region {:?}",
-                          peer.get_id(),
-                          pd_region);
+                    self.send_destroy_peer_message(local_region, peer, pd_region);
+                    return;
                 }
+                info!("[region {}] {} is still valid in region {:?}",
+                      local_region.get_id(),
+                      peer.get_id(),
+                      pd_region);
+
             }
             Err(e) => error!("get region failed {:?}", e),
         }

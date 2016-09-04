@@ -453,7 +453,13 @@ impl Peer {
                     self.leader_missing_time = Some(Instant::now())
                 }
             } else {
-                if self.leader_missing_time.is_some() {
+                // When a peer is not initialized, it has no data at storage.
+                // Even if a leader sends heartbeats to it, we consider it as
+                // in the `leader missing` state. That is because if it's isolated from the leader
+                // before it could successfully receive snapshot from the leader and
+                // apply that snapshot, no raft ready event will be triggered,
+                // so that we could not detect the leader is missing for it at here.
+                if self.is_initialized() && self.leader_missing_time.is_some() {
                     self.leader_missing_time = None
                 }
             }
